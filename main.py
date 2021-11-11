@@ -1,9 +1,8 @@
 import requests
 from random import randrange
-import json
 from Files.Files import *
-from pprint import pprint
 import time
+from DB import db
 
 
 class VK:
@@ -14,32 +13,33 @@ class VK:
         list_search = ['Поиск', 'поиск', 'Найти', 'найти', 'Найди', 'найди', 'п']
         self.get_data_session()
         while True:
-            data = self.get_messages()
-            if data:
-                message = data['message']
-                user_id = data['from_user_id']
-                user_params = self.get_user_params(user_id)
+            self.data = self.get_messages()
+            if self.data:
+                self.message = self.data['message']
+                self.user_id = self.data['from_user_id']
+                self.user_params = self.get_user_params(self.user_id)
                 # print(user_params)
-                if message in list_hello:
-                    self.send_message(f"Привет, {user_params['response'][0]['first_name']}", user_id)
-                    self.send_message('Напишите слово - Найти, и чат-бот VKinder найдёт для вас друзей)))', user_id)
-                elif message in list_bye_bye:
-                    self.send_message(f"До скорого... {user_params['response'][0]['first_name']}", user_id)
-                elif message in list_search:
-                    params_for_search = self.check_users_params(user_params)
-                    search = self.get_users_search(params_for_search)
-                    self.send_message('Начинаю поиск...секундочку, пожалуйста...', user_id)
-                    self.get_photos(self.get_list_users_id(search), user_id)
+                if self.message in list_hello:
+                    self.send_message(f"Привет, {self.user_params['response'][0]['first_name']}", self.user_id)
+                    self.send_message('Напишите слово - Найти, и чат-бот VKinder найдёт для вас друзей)))', self.user_id)
+                elif self.message in list_bye_bye:
+                    self.send_message(f"До скорого... {self.user_params['response'][0]['first_name']}", self.user_id)
+                elif self.message in list_search:
+                    self.params_for_search = self.check_users_params(self.user_params)
+                    self.search = self.get_users_search(self.params_for_search)
+                    self.send_message('Начинаю поиск...секундочку, пожалуйста...', self.user_id)
+
+                    self.get_photos(self.get_list_users_id(self.search), self.user_id)
 
                 else:
-                    self.send_message('Не понимаю вашего запроса.', user_id)
+                    self.send_message('Не понимаю вашего запроса.', self.user_id)
 
     def get_list_users_id(self, search):
         list_id = []
         for dic in search['response']['items']:
             if not dic['is_closed']:
                 list_id.append(dic['id'])
-        return list_id
+        return  list_id
 
     def get_photos(self, list_id, user_id):
         url = 'https://api.vk.com/method/photos.get?'
@@ -71,16 +71,22 @@ class VK:
 
     def send_photos_link(self, user_id, attachment, search_id):
         url = 'https://api.vk.com/method/messages.send?'
+        message = self.get_link_user(search_id)
         params = {
             'user_id': user_id,
-            "message": self.get_link_user(search_id),
+            "message": message,
             "attachment": attachment,
             'random_id': randrange(10 ** 7),
             'access_token': file.get_token()['vk_token_chat'],
             'v': '5.131'
         }
         req = requests.post(url, params=params).json()
-        print(req)
+        obj_select = db.select_user_id()
+        for id in obj_select:
+            if str(id).find(str(search_id)) != -1:
+                break
+        else:
+            db.write_user_db(message, attachment, search_id)
 
     def get_link_user(self, search_id):
         link_user = 'https://vk.com/id' + str(search_id)
@@ -147,9 +153,13 @@ class VK:
         return user_params
 
     def check_users_params(self, user_params):
+        my_list = ''
         params_for_search = {}
+        print(user_params['response'][0])
         key_list = user_params['response'][0].keys()
-        my_list = user_params['response'][0]['bdate'].split('.')
+        print(key_list)
+        if 'bdate' in user_params['response'][0]:
+            my_list = user_params['response'][0]['bdate'].split('.')
         list_status = [1, 2, 3, 4, 5, 6, 7, 8, 0]
         list_age = [x for x in range(10, 100)]
 
@@ -159,8 +169,8 @@ class VK:
         else:
             while True:
                 self.send_message('Введите ваш возраст(10 - 99 лет), пожалуйста: ', user_params['response'][0]['id'])
-                age = int(self.get_messages()['message'])
-                if age and age in list_age:
+                age = self.get_messages()['message']
+                if age.isdigit() and 15 < int(age) < 100:
                     params_for_search['age_from'] = age
                     params_for_search['age_to'] = age
                     break
@@ -185,20 +195,22 @@ class VK:
         if 'relation' in key_list and user_params['response'][0]['relation']:
             params_for_search['status'] = user_params['response'][0]['relation']
         else:
-            self.send_message("""Введите ваше семейное положение, пожалуйста\nВозможные значения:
-                                1 — не женат/не замужем;
-                                2 — есть друг/есть подруга;
-                                3 — помолвлен/помолвлена;
-                                4 — женат/замужем;з
-                                5 — всё сложно;
-                                6 — в активном поиске;
-                                7 — влюблён/влюблена;
-                                8 — в гражданском браке;
-                                0 — не указано.
-                                : """, user_params['response'][0]['id'])
-            relation = int(self.get_messages()['message'])
-            if relation and relation in list_status:
-                params_for_search['status'] = relation
+            while True:
+                self.send_message("""Введите ваше семейное положение, пожалуйста\nВозможные значения:
+                                    1 — не женат/не замужем;
+                                    2 — есть друг/есть подруга;
+                                    3 — помолвлен/помолвлена;
+                                    4 — женат/замужем;з
+                                    5 — всё сложно;
+                                    6 — в активном поиске;
+                                    7 — влюблён/влюблена;
+                                    8 — в гражданском браке;
+                                    0 — не указано.
+                                    : """, user_params['response'][0]['id'])
+                relation = self.get_messages()['message']
+                if relation.isdigit() and int(relation) in list_status:
+                    params_for_search['status'] = relation
+                    break
 
         params_for_search['access_token'] = file.get_token()['vk_token']
         params_for_search['v'] = '5.131'
